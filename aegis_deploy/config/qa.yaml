@@ -1,0 +1,43 @@
+# =============================================================================
+# Aegis Deploy — QA Environment Overlay
+# =============================================================================
+# Merged on top of base.yaml when AEGIS_DEPLOY_ENV=qa
+# Designed for development/testing: smaller batches, CPU-only, debug logging.
+# =============================================================================
+
+storage:
+  raw:
+    s3:
+      bucket: "${AEGIS_RAW_S3_BUCKET:aegis-qa-raw-images}"
+  clean:
+    s3:
+      bucket: "${AEGIS_CLEAN_S3_BUCKET:aegis-qa-clean-images}"
+
+vault:
+  host: "${AEGIS_VAULT_DB_HOST:localhost}"
+  database: "${AEGIS_VAULT_DB_NAME:aegis_vault_qa}"
+  pool_size: 2
+  max_overflow: 3
+
+aegis:
+  runtime:
+    dataloader_num_workers: 0
+
+  ocr:
+    gpu_usage: false
+
+  ner:
+    device: "cpu"
+
+discovery:
+  batch_size: 50
+
+orchestration:
+  parallelism: 2
+
+monitoring:
+  cloudwatch:
+    enabled: false
+
+logging:
+  level: "DEBUG"

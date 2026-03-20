@@ -1,0 +1,113 @@
+# =============================================================================
+# Aegis Deploy — Base Configuration
+# =============================================================================
+# Shared defaults for all environments. Environment-specific overlays (qa.yaml,
+# prod.yaml) are deep-merged on top of this file.
+#
+# Supports ${VAR_NAME:default} environment variable interpolation.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# AWS Resources
+# ---------------------------------------------------------------------------
+aws:
+  region: "${AWS_REGION:us-east-1}"
+  account_id: "${AWS_ACCOUNT_ID:}"
+
+# ---------------------------------------------------------------------------
+# Storage — Raw Input
+# ---------------------------------------------------------------------------
+storage:
+  raw:
+    s3:
+      bucket: "${AEGIS_RAW_S3_BUCKET:aegis-raw-images}"
+      prefix: "incoming/"
+    healthimaging:
+      datastore_id: "${AEGIS_HI_DATASTORE_ID:}"
+
+  # Storage — Clean Output
+  clean:
+    s3:
+      bucket: "${AEGIS_CLEAN_S3_BUCKET:aegis-clean-images}"
+      prefix: "deidentified/"
+    healthimaging:
+      datastore_id: "${AEGIS_CLEAN_HI_DATASTORE_ID:}"
+
+# ---------------------------------------------------------------------------
+# Identity Vault (PostgreSQL / RDS)
+# ---------------------------------------------------------------------------
+vault:
+  host: "${AEGIS_VAULT_DB_HOST:localhost}"
+  port: "${AEGIS_VAULT_DB_PORT:5432}"
+  database: "${AEGIS_VAULT_DB_NAME:aegis_vault}"
+  username: "${AEGIS_VAULT_DB_USER:aegis}"
+  password: "${AEGIS_VAULT_DB_PASSWORD:}"
+  pool_size: 5
+  max_overflow: 10
+
+# ---------------------------------------------------------------------------
+# Aegis Core Pipeline Settings
+# (Passed through to monai_aegis config)
+# ---------------------------------------------------------------------------
+aegis:
+  paths:
+    input_dir: "/data/input"
+    output_dir: "/data/output"
+    not_processed_dir: "/data/not_processed"
+    dicom_folder: "dicom"
+    image_folder: "image"
+
+  runtime:
+    dataloader_num_workers: 0
+
+  tokenization:
+    salt: "${AEGIS_TOKEN_SALT:}"
+
+  series:
+    enabled: true
+    accepted_modalities: ["CT", "MR", "US", "CR", "DX", "MG", "PT", "XA", "RF", "OT"]
+    keyframe_count: 3
+    output_structure: "hierarchical"
+
+  ocr:
+    languages: ["en"]
+    gpu_usage: false
+    confidence_threshold: 0.4
+
+  ner:
+    enabled: true
+    model_name: "StanfordAIMI/stanford-deidentifier-base"
+    device: "${AEGIS_DEVICE:cpu}"
+
+# ---------------------------------------------------------------------------
+# Discovery Operator
+# ---------------------------------------------------------------------------
+discovery:
+  batch_size: 500
+  manifest_dir: "/tmp/manifests"
+
+# ---------------------------------------------------------------------------
+# Argo / Orchestration
+# ---------------------------------------------------------------------------
+orchestration:
+  parallelism: 4
+  retry_policy:
+    limit: 2
+    backoff_duration: "30s"
+    backoff_factor: 2
+
+# ---------------------------------------------------------------------------
+# Monitoring
+# ---------------------------------------------------------------------------
+monitoring:
+  cloudwatch:
+    enabled: false
+    namespace: "AegisDeploy"
+    log_group: "/aegis-deploy/pipeline"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

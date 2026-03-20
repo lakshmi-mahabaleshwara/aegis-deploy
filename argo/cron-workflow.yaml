@@ -1,0 +1,47 @@
+# =============================================================================
+# Aegis Deploy — Argo CronWorkflow
+# =============================================================================
+# Scheduled trigger for the de-identification pipeline.
+# Runs nightly (or on configurable schedule) on the EKS cluster.
+#
+# Parameters:
+#   - environment: qa or prod
+#   - image_tag: Docker image tag to use
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: aegis-deid-cron
+  namespace: aegis
+  labels:
+    app: aegis-deploy
+    component: scheduler
+spec:
+  # Nightly at 2:00 AM UTC
+  schedule: "0 2 * * *"
+  timezone: "UTC"
+  concurrencyPolicy: "Forbid"
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+
+  workflowSpec:
+    entrypoint: aegis-deid-dag
+    arguments:
+      parameters:
+        - name: environment
+          value: "qa"
+        - name: image-tag
+          value: "latest"
+
+    # Use spot instances for cost savings
+    tolerations:
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "amd64"
+        effect: "NoSchedule"
+
+    # Reference the DAG workflow template
+    workflowTemplateRef:
+      name: aegis-deid-dag
+      clusterScope: false

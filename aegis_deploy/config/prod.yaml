@@ -1,0 +1,46 @@
+# =============================================================================
+# Aegis Deploy — Production Environment Overlay
+# =============================================================================
+# Merged on top of base.yaml when AEGIS_DEPLOY_ENV=prod
+# GPU-enabled, strict security, production S3 buckets, CloudWatch metrics.
+# =============================================================================
+
+storage:
+  raw:
+    s3:
+      bucket: "${AEGIS_RAW_S3_BUCKET:aegis-prod-raw-images}"
+  clean:
+    s3:
+      bucket: "${AEGIS_CLEAN_S3_BUCKET:aegis-prod-clean-images}"
+
+vault:
+  host: "${AEGIS_VAULT_DB_HOST:}"
+  database: "${AEGIS_VAULT_DB_NAME:aegis_vault}"
+  pool_size: 10
+  max_overflow: 20
+
+aegis:
+  runtime:
+    dataloader_num_workers: 4
+
+  ocr:
+    gpu_usage: true
+
+  ner:
+    device: "${AEGIS_DEVICE:cuda}"
+
+discovery:
+  batch_size: 1000
+
+orchestration:
+  parallelism: 8
+  retry_policy:
+    limit: 3
+
+monitoring:
+  cloudwatch:
+    enabled: true
+    namespace: "AegisDeploy/Prod"
+
+logging:
+  level: "INFO"

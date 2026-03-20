@@ -1,0 +1,195 @@
+# =============================================================================
+# Aegis Deploy — De-Identification DAG Workflow Template
+# =============================================================================
+# 3-step DAG:
+#   1. discovery   — Scan raw storage, produce manifest
+#   2. deid-workers — Fan-out: parallel MAP workers per manifest chunk
+#   3. finalize     — Aggregate results, update vault, emit metrics
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: aegis-deid-dag
+  namespace: aegis
+  labels:
+    app: aegis-deploy
+    component: pipeline
+spec:
+  entrypoint: deid-pipeline
+  arguments:
+    parameters:
+      - name: environment
+        value: "qa"
+      - name: image-tag
+        value: "latest"
+      - name: parallelism
+        value: "4"
+
+  templates:
+    # -----------------------------------------------------------------
+    # Main DAG
+    # -----------------------------------------------------------------
+    - name: deid-pipeline
+      dag:
+        tasks:
+          # Step 1: Discovery — scan raw storage for new data
+          - name: discovery
+            template: run-discovery
+            arguments:
+              parameters:
+                - name: environment
+                  value: "{{workflow.parameters.environment}}"
+                - name: image-tag
+                  value: "{{workflow.parameters.image-tag}}"
+
+          # Step 2: Fan-out DeID workers
+          - name: deid-workers
+            depends: "discovery"
+            template: run-deid-worker
+            arguments:
+              parameters:
+                - name: chunk-index
+                  value: "{{item}}"
+                - name: environment
+                  value: "{{workflow.parameters.environment}}"
+                - name: image-tag
+                  value: "{{workflow.parameters.image-tag}}"
+              artifacts:
+                - name: manifest
+                  from: "{{tasks.discovery.outputs.artifacts.manifest}}"
+            # Fan-out over chunk indices
+            withSequence:
+              count: "{{workflow.parameters.parallelism}}"
+
+          # Step 3: Finalize — aggregate, report
+          - name: finalize
+            depends: "deid-workers"
+            template: run-finalize
+            arguments:
+              parameters:
+                - name: environment
+                  value: "{{workflow.parameters.environment}}"
+
+    # -----------------------------------------------------------------
+    # Step 1: Discovery Operator
+    # -----------------------------------------------------------------
+    - name: run-discovery
+      inputs:
+        parameters:
+          - name: environment
+          - name: image-tag
+      container:
+        image: "aegis-deploy:{{inputs.parameters.image-tag}}"
+        command: ["aegis-deploy"]
+        args:
+          - "--env"
+          - "{{inputs.parameters.environment}}"
+          - "discover"
+          - "--output"
+          - "/tmp/manifest.json"
+        env:
+          - name: AEGIS_DEPLOY_ENV
+            value: "{{inputs.parameters.environment}}"
+          - name: AEGIS_TOKEN_SALT
+            valueFrom:
+              secretKeyRef:
+                name: aegis-secrets
+                key: token-salt
+          - name: AEGIS_VAULT_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: aegis-secrets
+                key: db-password
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+      outputs:
+        artifacts:
+          - name: manifest
+            path: /tmp/manifest.json
+
+    # -----------------------------------------------------------------
+    # Step 2: DeID Worker (fan-out)
+    # -----------------------------------------------------------------
+    - name: run-deid-worker
+      inputs:
+        parameters:
+          - name: chunk-index
+          - name: environment
+          - name: image-tag
+        artifacts:
+          - name: manifest
+            path: /tmp/manifest.json
+      container:
+        image: "aegis-deploy:{{inputs.parameters.image-tag}}"
+        command: ["aegis-deploy"]
+        args:
+          - "--env"
+          - "{{inputs.parameters.environment}}"
+          - "run"
+          - "--manifest"
+          - "/tmp/manifest.json"
+          - "--chunk-index"
+          - "{{inputs.parameters.chunk-index}}"
+        env:
+          - name: AEGIS_DEPLOY_ENV
+            value: "{{inputs.parameters.environment}}"
+          - name: AEGIS_TOKEN_SALT
+            valueFrom:
+              secretKeyRef:
+                name: aegis-secrets
+                key: token-salt
+          - name: AEGIS_VAULT_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: aegis-secrets
+                key: db-password
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+      # Spot instance tolerations
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "kubernetes.io/spot"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      retryStrategy:
+        limit: 2
+        backoff:
+          duration: "30s"
+          factor: 2
+
+    # -----------------------------------------------------------------
+    # Step 3: Finalize
+    # -----------------------------------------------------------------
+    - name: run-finalize
+      inputs:
+        parameters:
+          - name: environment
+      container:
+        image: "aegis-deploy:latest"
+        command: ["python", "-c"]
+        args:
+          - |
+            import logging
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger('aegis-finalize')
+            logger.info('Pipeline batch complete — environment=%s', '{{inputs.parameters.environment}}')
+            logger.info('Results aggregation and CloudWatch metrics would be emitted here.')
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
